@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Download Your Photo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      background: #0a0a0a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      font-family: sans-serif;
+      gap: 20px;
+    }
+    h1 { color: #fff; font-size: 22px; text-align: center; font-weight: 700; }
+    p  { color: #aaa; font-size: 14px; text-align: center; }
+
+    .photos {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+      width: 100%;
+    }
+    .photo-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      flex: 1;
+      min-width: 140px;
+      max-width: 280px;
+    }
+    .photo-card img {
+      width: 100%;
+      border-radius: 10px;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+    }
+    .photo-card img.bw { filter: grayscale(100%); }
+    .label {
+      color: #aaa;
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .btn {
+      background: #FF6B00;
+      color: #fff;
+      border: none;
+      padding: 14px 28px;
+      border-radius: 50px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      width: 100%;
+      text-align: center;
+    }
+    .btn.bw-btn { background: #444; }
+    .btn:active { opacity: 0.8; }
+    .hint { color: #555; font-size: 12px; margin-top: -8px; }
+    #expired { display: none; color: #f44336; font-size: 16px; text-align: center; }
+    canvas { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Your Photo is Ready! 🎉</h1>
+  <p>Choose your preferred version</p>
+
+  <div class="photos">
+    <div class="photo-card">
+      <p class="label">🎨 Colored</p>
+      <img id="photoColor" alt="Colored photo" />
+      <button class="btn" onclick="downloadColor()">⬇️ Download Color</button>
+    </div>
+    <div class="photo-card">
+      <p class="label">⬛ Black & White</p>
+      <img id="photoBW" class="bw" alt="B&W photo" />
+      <button class="btn bw-btn" onclick="downloadBW()">⬇️ Download B&W</button>
+    </div>
+  </div>
+
+  <p class="hint">iOS: press & hold the photo → Save to Photos</p>
+  <p id="expired">⏰ This photo has expired (24 hours).</p>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const imgUrl = params.get('img');
+    const colorImg = document.getElementById('photoColor');
+    const bwImg    = document.getElementById('photoBW');
+
+    if (imgUrl) {
+      colorImg.src = imgUrl;
+      bwImg.src    = imgUrl;
+      colorImg.onerror = () => {
+        document.querySelectorAll('.photo-card').forEach(el => el.style.display = 'none');
+        document.getElementById('expired').style.display = 'block';
+      };
+    }
+
+    async function downloadColor() {
+      try {
+        const res  = await fetch(imgUrl);
+        const blob = await res.blob();
+        triggerDownload(URL.createObjectURL(blob), 'photo-color.jpg');
+      } catch { window.open(imgUrl, '_blank'); }
+    }
+
+    async function downloadBW() {
+      try {
+        const res  = await fetch(imgUrl);
+        const blob = await res.blob();
+        const bmp  = await createImageBitmap(await blob);
+        const canvas = document.getElementById('canvas');
+        canvas.width  = bmp.width;
+        canvas.height = bmp.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(bmp, 0, 0);
+        // Convert to grayscale
+        const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        for (let i = 0; i < data.data.length; i += 4) {
+          const avg = data.data[i] * 0.299 + data.data[i+1] * 0.587 + data.data[i+2] * 0.114;
+          data.data[i] = data.data[i+1] = data.data[i+2] = avg;
+        }
+        ctx.putImageData(data, 0, 0);
+        canvas.toBlob(b => triggerDownload(URL.createObjectURL(b), 'photo-bw.jpg'), 'image/jpeg', 0.92);
+      } catch { window.open(imgUrl, '_blank'); }
+    }
+
+    function triggerDownload(url, name) {
+      const a = document.createElement('a');
+      a.href = url; a.download = name; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  </script>
+</body>
+</html>
