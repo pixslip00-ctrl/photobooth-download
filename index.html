@@ -36,12 +36,11 @@
       min-width: 140px;
       max-width: 280px;
     }
-    .photo-card img {
+    .photo-card img, .photo-card canvas {
       width: 100%;
       border-radius: 10px;
       box-shadow: 0 6px 24px rgba(0,0,0,0.5);
     }
-    .photo-card img.bw { filter: grayscale(100%); }
     .label {
       color: #aaa;
       font-size: 13px;
@@ -65,7 +64,6 @@
     .btn:active { opacity: 0.8; }
     .hint { color: #555; font-size: 12px; margin-top: -8px; }
     #expired { display: none; color: #f44336; font-size: 16px; text-align: center; }
-    canvas { display: none; }
   </style>
 </head>
 <body>
@@ -75,62 +73,98 @@
   <div class="photos">
     <div class="photo-card">
       <p class="label">🎨 Colored</p>
-      <img id="photoColor" alt="Colored photo" />
+      <img id="photoColor" crossorigin="anonymous" alt="Colored photo" />
       <button class="btn" onclick="downloadColor()">⬇️ Download Color</button>
     </div>
     <div class="photo-card">
       <p class="label">⬛ Black & White</p>
-      <img id="photoBW" class="bw" alt="B&W photo" />
+      <canvas id="bwPreview" style="width:100%;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,0.5);display:none;"></canvas>
       <button class="btn bw-btn" onclick="downloadBW()">⬇️ Download B&W</button>
     </div>
   </div>
 
   <p class="hint">iOS: press & hold the photo → Save to Photos</p>
   <p id="expired">⏰ This photo has expired (24 hours).</p>
-  <canvas id="canvas"></canvas>
+
+  <!-- hidden canvas used for B&W download blob -->
+  <canvas id="bwCanvas" style="display:none;"></canvas>
 
   <script>
-    const params = new URLSearchParams(window.location.search);
-    const imgUrl = params.get('img');
-    const colorImg = document.getElementById('photoColor');
-    const bwImg    = document.getElementById('photoBW');
+    const params    = new URLSearchParams(window.location.search);
+    const imgUrl    = params.get('img');
+    const colorImg  = document.getElementById('photoColor');
+    const bwPreview = document.getElementById('bwPreview');
+
+    function isIOS() {
+      return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    }
+
+    function applyGrayscale(canvas) {
+      canvas.width  = colorImg.naturalWidth;
+      canvas.height = colorImg.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(colorImg, 0, 0);
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < data.data.length; i += 4) {
+        const g = data.data[i]*0.299 + data.data[i+1]*0.587 + data.data[i+2]*0.114;
+        data.data[i] = data.data[i+1] = data.data[i+2] = g;
+      }
+      ctx.putImageData(data, 0, 0);
+    }
 
     if (imgUrl) {
       colorImg.src = imgUrl;
-      bwImg.src    = imgUrl;
+
       colorImg.onerror = () => {
         document.querySelectorAll('.photo-card').forEach(el => el.style.display = 'none');
         document.getElementById('expired').style.display = 'block';
       };
-    }
 
-    async function downloadColor() {
-      try {
-        const res  = await fetch(imgUrl);
-        const blob = await res.blob();
-        triggerDownload(URL.createObjectURL(blob), 'photo-color.jpg');
-      } catch { window.open(imgUrl, '_blank'); }
-    }
-
-    async function downloadBW() {
-      try {
-        const res  = await fetch(imgUrl);
-        const blob = await res.blob();
-        const bmp  = await createImageBitmap(await blob);
-        const canvas = document.getElementById('canvas');
-        canvas.width  = bmp.width;
-        canvas.height = bmp.height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(bmp, 0, 0);
-        // Convert to grayscale
-        const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        for (let i = 0; i < data.data.length; i += 4) {
-          const avg = data.data[i] * 0.299 + data.data[i+1] * 0.587 + data.data[i+2] * 0.114;
-          data.data[i] = data.data[i+1] = data.data[i+2] = avg;
+      // Once loaded, render the B&W preview on a canvas (avoids CSS filter CORS issues)
+      colorImg.onload = () => {
+        try {
+          applyGrayscale(bwPreview);
+          bwPreview.style.display = 'block';
+        } catch {
+          // CORS fallback: show image with CSS grayscale filter
+          const img = document.createElement('img');
+          img.src = imgUrl;
+          img.style.cssText = 'width:100%;border-radius:10px;filter:grayscale(100%);';
+          bwPreview.parentNode.insertBefore(img, bwPreview);
         }
-        ctx.putImageData(data, 0, 0);
-        canvas.toBlob(b => triggerDownload(URL.createObjectURL(b), 'photo-bw.jpg'), 'image/jpeg', 0.92);
-      } catch { window.open(imgUrl, '_blank'); }
+      };
+    }
+
+    function downloadColor() {
+      if (isIOS()) {
+        // iOS can't programmatically trigger downloads — open in new tab for long-press save
+        window.open(imgUrl, '_blank');
+        return;
+      }
+      fetch(imgUrl)
+        .then(r => r.blob())
+        .then(b => triggerDownload(URL.createObjectURL(b), 'photo-color.jpg'))
+        .catch(() => window.open(imgUrl, '_blank'));
+    }
+
+    function downloadBW() {
+      try {
+        const canvas = document.getElementById('bwCanvas');
+        applyGrayscale(canvas);
+
+        if (isIOS()) {
+          // iOS: open B&W as data URL in new tab → user can long-press → Save to Photos
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+          window.open(dataUrl, '_blank');
+        } else {
+          canvas.toBlob(
+            b => triggerDownload(URL.createObjectURL(b), 'photo-bw.jpg'),
+            'image/jpeg', 0.92
+          );
+        }
+      } catch {
+        window.open(imgUrl, '_blank');
+      }
     }
 
     function triggerDownload(url, name) {
