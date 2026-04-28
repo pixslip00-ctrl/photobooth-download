@@ -19,7 +19,6 @@
     }
     h1 { color: #fff; font-size: 22px; text-align: center; font-weight: 700; }
     p  { color: #aaa; font-size: 14px; text-align: center; }
-
     .photos {
       display: flex;
       gap: 16px;
@@ -36,11 +35,12 @@
       min-width: 140px;
       max-width: 280px;
     }
-    .photo-card img, .photo-card canvas {
+    .photo-card img {
       width: 100%;
       border-radius: 10px;
       box-shadow: 0 6px 24px rgba(0,0,0,0.5);
     }
+    .photo-card img.bw { filter: grayscale(100%); }
     .label {
       color: #aaa;
       font-size: 13px;
@@ -64,6 +64,7 @@
     .btn:active { opacity: 0.8; }
     .hint { color: #555; font-size: 12px; margin-top: -8px; }
     #expired { display: none; color: #f44336; font-size: 16px; text-align: center; }
+    canvas { display: none; }
   </style>
 </head>
 <body>
@@ -73,71 +74,73 @@
   <div class="photos">
     <div class="photo-card">
       <p class="label">🎨 Colored</p>
-      <img id="photoColor" crossorigin="anonymous" alt="Colored photo" />
+      <!-- No crossorigin here — iOS long-press save works normally -->
+      <img id="photoColor" alt="Colored photo" />
       <button class="btn" onclick="downloadColor()">⬇️ Download Color</button>
     </div>
     <div class="photo-card">
       <p class="label">⬛ Black & White</p>
-      <canvas id="bwPreview" style="width:100%;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,0.5);display:none;"></canvas>
+      <!-- src will be replaced with actual B&W data URL after load -->
+      <img id="photoBW" alt="B&W photo" />
       <button class="btn bw-btn" onclick="downloadBW()">⬇️ Download B&W</button>
     </div>
   </div>
 
   <p class="hint">iOS: press & hold the photo → Save to Photos</p>
   <p id="expired">⏰ This photo has expired (24 hours).</p>
-
-  <!-- hidden canvas used for B&W download blob -->
-  <canvas id="bwCanvas" style="display:none;"></canvas>
+  <canvas id="canvas"></canvas>
 
   <script>
-    const params    = new URLSearchParams(window.location.search);
-    const imgUrl    = params.get('img');
-    const colorImg  = document.getElementById('photoColor');
-    const bwPreview = document.getElementById('bwPreview');
+    const params   = new URLSearchParams(window.location.search);
+    const imgUrl   = params.get('img');
+    const colorImg = document.getElementById('photoColor');
+    const bwImg    = document.getElementById('photoBW');
 
     function isIOS() {
       return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     }
 
-    function applyGrayscale(canvas) {
-      canvas.width  = colorImg.naturalWidth;
-      canvas.height = colorImg.naturalHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(colorImg, 0, 0);
-      const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      for (let i = 0; i < data.data.length; i += 4) {
-        const g = data.data[i]*0.299 + data.data[i+1]*0.587 + data.data[i+2]*0.114;
-        data.data[i] = data.data[i+1] = data.data[i+2] = g;
-      }
-      ctx.putImageData(data, 0, 0);
-    }
-
     if (imgUrl) {
       colorImg.src = imgUrl;
-
       colorImg.onerror = () => {
         document.querySelectorAll('.photo-card').forEach(el => el.style.display = 'none');
         document.getElementById('expired').style.display = 'block';
       };
 
-      // Once loaded, render the B&W preview on a canvas (avoids CSS filter CORS issues)
-      colorImg.onload = () => {
+      // Load a hidden crossorigin copy just to generate the B&W data URL
+      // Then set it as bwImg.src — so iOS long-press saves actual B&W pixels
+      const helperLoad = new Image();
+      helperLoad.crossOrigin = 'anonymous';
+      helperLoad.onload = function() {
         try {
-          applyGrayscale(bwPreview);
-          bwPreview.style.display = 'block';
+          const canvas  = document.getElementById('canvas');
+          canvas.width  = helperLoad.naturalWidth;
+          canvas.height = helperLoad.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(helperLoad, 0, 0);
+          const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          for (let i = 0; i < data.data.length; i += 4) {
+            const g = data.data[i]*0.299 + data.data[i+1]*0.587 + data.data[i+2]*0.114;
+            data.data[i] = data.data[i+1] = data.data[i+2] = g;
+          }
+          ctx.putImageData(data, 0, 0);
+          // Set actual B&W data URL — long-press on iOS saves real B&W now
+          bwImg.src = canvas.toDataURL('image/jpeg', 0.92);
         } catch {
-          // CORS fallback: show image with CSS grayscale filter
-          const img = document.createElement('img');
-          img.src = imgUrl;
-          img.style.cssText = 'width:100%;border-radius:10px;filter:grayscale(100%);';
-          bwPreview.parentNode.insertBefore(img, bwPreview);
+          // CORS failed — fallback to CSS filter (visual only)
+          bwImg.src = imgUrl;
+          bwImg.style.filter = 'grayscale(100%)';
         }
       };
+      helperLoad.onerror = () => {
+        bwImg.src = imgUrl;
+        bwImg.style.filter = 'grayscale(100%)';
+      };
+      helperLoad.src = imgUrl + (imgUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
     }
 
     function downloadColor() {
       if (isIOS()) {
-        // iOS can't programmatically trigger downloads — open in new tab for long-press save
         window.open(imgUrl, '_blank');
         return;
       }
@@ -148,23 +151,40 @@
     }
 
     function downloadBW() {
-      try {
-        const canvas = document.getElementById('bwCanvas');
-        applyGrayscale(canvas);
+      // Load a separate hidden image with crossOrigin for canvas access
+      // (separate from the display img so iOS long-press still works on display img)
+      const helperImg = new Image();
+      helperImg.crossOrigin = 'anonymous';
+      helperImg.onload = function() {
+        try {
+          const canvas  = document.getElementById('canvas');
+          canvas.width  = helperImg.naturalWidth;
+          canvas.height = helperImg.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(helperImg, 0, 0);
+          const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          for (let i = 0; i < data.data.length; i += 4) {
+            const g = data.data[i]*0.299 + data.data[i+1]*0.587 + data.data[i+2]*0.114;
+            data.data[i] = data.data[i+1] = data.data[i+2] = g;
+          }
+          ctx.putImageData(data, 0, 0);
 
-        if (isIOS()) {
-          // iOS: open B&W as data URL in new tab → user can long-press → Save to Photos
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-          window.open(dataUrl, '_blank');
-        } else {
-          canvas.toBlob(
-            b => triggerDownload(URL.createObjectURL(b), 'photo-bw.jpg'),
-            'image/jpeg', 0.92
-          );
+          if (isIOS()) {
+            // Open B&W data URL in new tab → user can long-press → Save to Photos
+            window.open(canvas.toDataURL('image/jpeg', 0.92), '_blank');
+          } else {
+            canvas.toBlob(
+              b => triggerDownload(URL.createObjectURL(b), 'photo-bw.jpg'),
+              'image/jpeg', 0.92
+            );
+          }
+        } catch {
+          window.open(imgUrl, '_blank');
         }
-      } catch {
-        window.open(imgUrl, '_blank');
-      }
+      };
+      helperImg.onerror = () => window.open(imgUrl, '_blank');
+      // Add timestamp to force a fresh CORS request
+      helperImg.src = imgUrl + (imgUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
     }
 
     function triggerDownload(url, name) {
