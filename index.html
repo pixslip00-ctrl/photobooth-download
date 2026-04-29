@@ -93,6 +93,7 @@
   <script>
     const params   = new URLSearchParams(window.location.search);
     const imgUrl   = params.get('img');
+    const ts       = params.get('ts');
     const colorImg = document.getElementById('photoColor');
     const bwImg    = document.getElementById('photoBW');
 
@@ -100,7 +101,12 @@
       return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     }
 
-    if (imgUrl) {
+    // Check 24-hour expiry via timestamp in URL
+    const EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+    if (ts && (Date.now() - parseInt(ts)) > EXPIRY_MS) {
+      document.querySelectorAll('.photo-card').forEach(el => el.style.display = 'none');
+      document.getElementById('expired').style.display = 'block';
+    } else if (imgUrl) {
       colorImg.src = imgUrl;
       colorImg.onerror = () => {
         document.querySelectorAll('.photo-card').forEach(el => el.style.display = 'none');
