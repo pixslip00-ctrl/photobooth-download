@@ -1,11 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Download Your Photo</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+<head> <meta charset="UTF-8" /> <meta name="viewport" content="width=device-width, initial-scale=1.0" /> <title>Download Your Photo</title> <style> * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       min-height: 100vh;
       background: #0a0a0a;
@@ -60,53 +55,33 @@
       width: 100%;
       text-align: center;
     }
-    .btn.bw-btn { background: #444; }
+    .btn.bw-btn { background: #444; color: #fff; }
+    .btn.gif-btn { background: #6c5ce7; color: #fff; }
     .btn:active { opacity: 0.8; }
     .hint { color: #555; font-size: 12px; margin-top: -8px; }
     #expired { display: none; color: #f44336; font-size: 16px; text-align: center; }
     canvas { display: none; }
   </style>
 </head>
-<body>
-  <h1>Your Photo is Ready! 🎉</h1>
-  <p>Choose your preferred version</p>
-
-  <div class="photos">
-    <div class="photo-card">
-      <p class="label">🎨 Colored</p>
-      <!-- No crossorigin here — iOS long-press save works normally -->
-      <img id="photoColor" alt="Colored photo" />
-      <button class="btn" onclick="downloadColor()">⬇️ Download Color</button>
-    </div>
-    <div class="photo-card">
-      <p class="label">⬛ Black & White</p>
-      <!-- src will be replaced with actual B&W data URL after load -->
-      <img id="photoBW" alt="B&W photo" />
-      <button class="btn bw-btn" onclick="downloadBW()">⬇️ Download B&W</button>
-    </div>
-  </div>
-
-  <p class="hint">iOS: press & hold the photo → Save to Photos</p>
-  <p id="expired">⏰ This photo has expired (24 hours).</p>
-  <canvas id="canvas"></canvas>
-
-  <script>
-    const params   = new URLSearchParams(window.location.search);
+<body> <h1>Your Photo is Ready!</h1> <p>Choose your preferred version</p> <div class="photos"> <div class="photo-card"> <p class="label">Colored</p> <!-- No crossorigin here — iOS long-press save works normally --> <img id="photoColor" alt="Colored photo" /> <button class="btn" onclick="downloadColor()">Download Color</button> </div> <div class="photo-card"> <p class="label">Black & White</p> <!-- src will be replaced with actual B&W data URL after load --> <img id="photoBW" alt="B&W photo" /> <button class="btn bw-btn" onclick="downloadBW()">Download B&W</button> </div> <div class="photo-card" id="gifCard" style="display:none"> <p class="label">GIF</p> <img id="photoGif" alt="Animated GIF" /> <button class="btn gif-btn" onclick="downloadGif()">Download GIF</button> </div> </div> <p class="hint">iOS: press & hold the photo → Save to Photos</p> <p id="expired">This photo has expired (24 hours).</p> <canvas id="canvas"></canvas> <script> const params   = new URLSearchParams(window.location.search);
     const imgUrl   = params.get('img');
-    const ts       = params.get('ts');
+    const gifUrl   = params.get('gif');
     const colorImg = document.getElementById('photoColor');
     const bwImg    = document.getElementById('photoBW');
+
+    if (gifUrl) {
+      const gc = document.getElementById('gifCard');
+      const gi = document.getElementById('photoGif');
+      gc.style.display = 'flex';
+      gi.onerror = () => { gc.style.display = 'none'; };
+      gi.src = gifUrl;
+    }
 
     function isIOS() {
       return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     }
 
-    // Check 24-hour expiry via timestamp in URL
-    const EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
-    if (ts && (Date.now() - parseInt(ts)) > EXPIRY_MS) {
-      document.querySelectorAll('.photo-card').forEach(el => el.style.display = 'none');
-      document.getElementById('expired').style.display = 'block';
-    } else if (imgUrl) {
+    if (imgUrl) {
       colorImg.src = imgUrl;
       colorImg.onerror = () => {
         document.querySelectorAll('.photo-card').forEach(el => el.style.display = 'none');
@@ -157,25 +132,49 @@
     }
 
     function downloadBW() {
-      // bwImg.src is already a real B&W data URL (set on page load via canvas).
-      // Use it directly — no need to re-fetch or re-do canvas conversion.
-      const src = bwImg.src;
-      const isBwDataUrl = src && src.startsWith('data:');
-      if (!isBwDataUrl) {
-        // B&W conversion failed (CORS) — fall back to opening original
-        window.open(imgUrl, '_blank');
-        return;
-      }
-      if (isIOS()) {
-        // Open data URL in new tab → long-press → Save to Photos
-        window.open(src, '_blank');
-      } else {
-        // Convert data URL → blob → trigger download
-        fetch(src)
-          .then(r => r.blob())
-          .then(b => triggerDownload(URL.createObjectURL(b), 'photo-bw.jpg'))
-          .catch(() => window.open(src, '_blank'));
-      }
+      // Load a separate hidden image with crossOrigin for canvas access
+      // (separate from the display img so iOS long-press still works on display img)
+      const helperImg = new Image();
+      helperImg.crossOrigin = 'anonymous';
+      helperImg.onload = function() {
+        try {
+          const canvas  = document.getElementById('canvas');
+          canvas.width  = helperImg.naturalWidth;
+          canvas.height = helperImg.naturalHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(helperImg, 0, 0);
+          const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          for (let i = 0; i < data.data.length; i += 4) {
+            const g = data.data[i]*0.299 + data.data[i+1]*0.587 + data.data[i+2]*0.114;
+            data.data[i] = data.data[i+1] = data.data[i+2] = g;
+          }
+          ctx.putImageData(data, 0, 0);
+
+          if (isIOS()) {
+            // Open B&W data URL in new tab → user can long-press → Save to Photos
+            window.open(canvas.toDataURL('image/jpeg', 0.92), '_blank');
+          } else {
+            canvas.toBlob(
+              b => triggerDownload(URL.createObjectURL(b), 'photo-bw.jpg'),
+              'image/jpeg', 0.92
+            );
+          }
+        } catch {
+          window.open(imgUrl, '_blank');
+        }
+      };
+      helperImg.onerror = () => window.open(imgUrl, '_blank');
+      // Add timestamp to force a fresh CORS request
+      helperImg.src = imgUrl + (imgUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
+    }
+
+    function downloadGif() {
+      if (!gifUrl) return;
+      if (isIOS()) { window.open(gifUrl, '_blank'); return; }
+      fetch(gifUrl)
+        .then(r => r.blob())
+        .then(b => triggerDownload(URL.createObjectURL(b), 'photo.gif'))
+        .catch(() => window.open(gifUrl, '_blank'));
     }
 
     function triggerDownload(url, name) {
