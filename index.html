@@ -85,6 +85,7 @@
     const vidsStr   = params.get('vids');
     const frameUrl  = params.get('frame');
     const slotsStr  = params.get('slots');
+    const framePos  = parseInt(params.get('framepos') || '0', 10) || 0;
     const layout    = params.get('layout');
     const headerUrl = params.get('header');
     const footerUrl = params.get('footer');
@@ -176,8 +177,8 @@
           const W = wrap.clientWidth || 260;
           const H = W * aspect;
           wrap.style.height = H + 'px';
-          vidUrls.forEach((src, i) => {
-            const p = slots[i]; const cx = p[0], cy = p[1], w = p[2], h = p[3];
+          const placeVid = (src, p) => {
+            const cx = p[0], cy = p[1], w = p[2], h = p[3];
             const v = mkVideo(src);
             v.style.left = ((cx - w / 2) * W) + 'px';
             v.style.top  = ((cy - h / 2) * H) + 'px';
@@ -185,11 +186,15 @@
             v.style.height = (h * H) + 'px';
             v.style.objectFit = 'cover';
             wrap.appendChild(v); v.play().catch(() => {});
-          });
+          };
+          // videos behind the frame (index < framePos)
+          vidUrls.forEach((src, i) => { if (i < framePos) placeVid(src, slots[i]); });
           frame.style.left = '0'; frame.style.top = '0';
           frame.style.width = W + 'px'; frame.style.height = H + 'px';
           frame.style.pointerEvents = 'none';
           wrap.appendChild(frame);
+          // videos on top of the frame (index >= framePos) — default (framePos 0) = all on top
+          vidUrls.forEach((src, i) => { if (i >= framePos) placeVid(src, slots[i]); });
         };
         frame.onerror = renderTemplate;
         frame.src = frameUrl;
@@ -354,11 +359,10 @@
         H = Math.round(W * (frameImg.naturalHeight / frameImg.naturalWidth));
         drawFn = (ctx) => {
           ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
-          vEls.forEach((v, i) => {
-            const p = slots[i]; const cx = p[0], cy = p[1], w = p[2], h = p[3];
-            drawCover(ctx, v, (cx - w / 2) * W, (cy - h / 2) * H, w * W, h * H);
-          });
+          const dv = (v, p) => drawCover(ctx, v, (p[0] - p[2] / 2) * W, (p[1] - p[3] / 2) * H, p[2] * W, p[3] * H);
+          vEls.forEach((v, i) => { if (i < framePos) dv(v, slots[i]); });
           ctx.drawImage(frameImg, 0, 0, W, H);
+          vEls.forEach((v, i) => { if (i >= framePos) dv(v, slots[i]); });
         };
       } else {
         const cols = gridCols();
