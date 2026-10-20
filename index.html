@@ -81,25 +81,41 @@
       gi.src = gifUrl;
     }
 
-    const vidUrl   = params.get('vid');
+    const vidsStr  = params.get('vids');
     const frameUrl = params.get('frame');
-    const slotStr  = params.get('slot');
+    const slotsStr = params.get('slots');
+    const vidUrls  = vidsStr ? vidsStr.split(',').map(decodeURIComponent).filter(Boolean) : [];
 
-    if (vidUrl) {
+    function mkVideo(src) {
+      const v = document.createElement('video');
+      v.src = src;
+      v.autoplay = true; v.loop = true; v.muted = true; v.playsInline = true;
+      v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', ''); v.setAttribute('muted', '');
+      return v;
+    }
+
+    if (vidUrls.length > 0) {
       const card = document.getElementById('liveCard');
       const wrap = document.getElementById('liveWrap');
       card.style.display = 'flex';
 
-      const video = document.createElement('video');
-      video.src = vidUrl;
-      video.autoplay = true; video.loop = true; video.muted = true;
-      video.playsInline = true;
-      video.setAttribute('playsinline', ''); video.setAttribute('webkit-playsinline', ''); video.setAttribute('muted', '');
-      video.onerror = () => { card.style.display = 'none'; };
+      const slots = slotsStr
+        ? slotsStr.split(';').map(s => s.split(',').map(Number))
+        : null;
 
-      if (frameUrl && slotStr) {
-        const parts = slotStr.split(',').map(Number);
-        const cx = parts[0], cy = parts[1], w = parts[2], h = parts[3];
+      function renderGrid() {
+        wrap.className = '';
+        wrap.style.display = 'grid';
+        wrap.style.gridTemplateColumns = 'repeat(' + (vidUrls.length >= 4 ? 2 : 1) + ', 1fr)';
+        wrap.style.gap = '4px';
+        wrap.innerHTML = '';
+        vidUrls.forEach(src => {
+          const v = mkVideo(src); v.className = 'live-plain';
+          wrap.appendChild(v); v.play().catch(() => {});
+        });
+      }
+
+      if (frameUrl && slots && slots.length >= vidUrls.length) {
         wrap.className = 'live-wrap';
         const frame = new Image();
         frame.className = 'frame';
@@ -108,28 +124,25 @@
           const W = wrap.clientWidth || 260;
           const H = W * aspect;
           wrap.style.height = H + 'px';
-          video.style.left   = ((cx - w / 2) * W) + 'px';
-          video.style.top    = ((cy - h / 2) * H) + 'px';
-          video.style.width  = (w * W) + 'px';
-          video.style.height = (h * H) + 'px';
-          video.style.objectFit = 'cover';
+          vidUrls.forEach((src, i) => {
+            const p = slots[i]; const cx = p[0], cy = p[1], w = p[2], h = p[3];
+            const v = mkVideo(src);
+            v.style.left = ((cx - w / 2) * W) + 'px';
+            v.style.top  = ((cy - h / 2) * H) + 'px';
+            v.style.width = (w * W) + 'px';
+            v.style.height = (h * H) + 'px';
+            v.style.objectFit = 'cover';
+            wrap.appendChild(v); v.play().catch(() => {});
+          });
           frame.style.left = '0'; frame.style.top = '0';
           frame.style.width = W + 'px'; frame.style.height = H + 'px';
           frame.style.pointerEvents = 'none';
-          wrap.appendChild(video);
           wrap.appendChild(frame);
-          video.play().catch(() => {});
         };
-        frame.onerror = () => {
-          video.className = 'live-plain';
-          wrap.appendChild(video);
-          video.play().catch(() => {});
-        };
+        frame.onerror = renderGrid;
         frame.src = frameUrl;
       } else {
-        video.className = 'live-plain';
-        wrap.appendChild(video);
-        video.play().catch(() => {});
+        renderGrid();
       }
     }
 
@@ -234,12 +247,13 @@
     }
 
     function downloadVid() {
-      if (!vidUrl) return;
-      if (isIOS()) { window.open(vidUrl, '_blank'); return; }
-      fetch(vidUrl)
+      const u = vidUrls[0];
+      if (!u) return;
+      if (isIOS()) { window.open(u, '_blank'); return; }
+      fetch(u)
         .then(r => r.blob())
         .then(b => triggerDownload(URL.createObjectURL(b), 'photo-live.mp4'))
-        .catch(() => window.open(vidUrl, '_blank'));
+        .catch(() => window.open(u, '_blank'));
     }
 
     function triggerDownload(url, name) {
