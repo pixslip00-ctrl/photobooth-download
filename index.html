@@ -308,7 +308,12 @@
         v.crossOrigin = 'anonymous';
         v.src = src; v.muted = true; v.loop = true; v.playsInline = true;
         v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', ''); v.setAttribute('muted', '');
-        v.oncanplay = () => resolve(v);
+        // Must be in the DOM (and technically "rendered") so frames decode for drawImage.
+        v.style.position = 'fixed'; v.style.left = '0'; v.style.top = '0';
+        v.style.width = '2px'; v.style.height = '2px'; v.style.opacity = '0.01'; v.style.pointerEvents = 'none';
+        document.body.appendChild(v);
+        const ready = () => { if (v.readyState >= 2) resolve(v); };
+        v.oncanplay = ready; v.onloadeddata = ready;
         v.onerror = () => reject(new Error('video load failed'));
         v.load();
       });
