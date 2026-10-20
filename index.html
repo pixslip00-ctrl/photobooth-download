@@ -57,7 +57,7 @@
     }
     .btn.bw-btn { background: #444; color: #fff; }
     .btn.gif-btn { background: #6c5ce7; color: #fff; }
-    .btn.live-btn { background: #e84393; color: #fff; }
+    .btn.live-btn { background: #777; color: #fff; }
     .live-wrap { position: relative; width: 100%; border-radius: 10px; overflow: hidden; box-shadow: 0 6px 24px rgba(0,0,0,0.5); background: #111; }
     .live-wrap video, .live-wrap img.frame { position: absolute; }
     .live-plain { width: 100%; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); background: #000; }
@@ -81,10 +81,13 @@
       gi.src = gifUrl;
     }
 
-    const vidsStr  = params.get('vids');
-    const frameUrl = params.get('frame');
-    const slotsStr = params.get('slots');
-    const vidUrls  = vidsStr ? vidsStr.split(',').map(decodeURIComponent).filter(Boolean) : [];
+    const vidsStr   = params.get('vids');
+    const frameUrl  = params.get('frame');
+    const slotsStr  = params.get('slots');
+    const layout    = params.get('layout');
+    const headerUrl = params.get('header');
+    const footerUrl = params.get('footer');
+    const vidUrls   = vidsStr ? vidsStr.split(',').map(decodeURIComponent).filter(Boolean) : [];
 
     function mkVideo(src) {
       const v = document.createElement('video');
@@ -93,6 +96,9 @@
       v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', ''); v.setAttribute('muted', '');
       return v;
     }
+
+    function gridCols() { return (layout === '2x2' || layout === '3x2') ? 2 : 1; }
+    function cellAspect() { return layout === '3-vertical' ? (9 / 16) : 1; }
 
     if (vidUrls.length > 0) {
       const card = document.getElementById('liveCard');
@@ -103,19 +109,49 @@
         ? slotsStr.split(';').map(s => s.split(',').map(Number))
         : null;
 
-      function renderGrid() {
+      // Sandwich / grid template: header image + video grid + footer image, as one.
+      function renderTemplate() {
         wrap.className = '';
-        wrap.style.display = 'grid';
-        wrap.style.gridTemplateColumns = 'repeat(' + (vidUrls.length >= 4 ? 2 : 1) + ', 1fr)';
-        wrap.style.gap = '4px';
+        wrap.style.background = '#fff';
+        wrap.style.borderRadius = '10px';
+        wrap.style.overflow = 'hidden';
+        wrap.style.boxShadow = '0 6px 24px rgba(0,0,0,0.5)';
         wrap.innerHTML = '';
+
+        if (headerUrl) {
+          const h = new Image();
+          h.src = headerUrl; h.style.width = '100%'; h.style.display = 'block';
+          wrap.appendChild(h);
+        }
+
+        const grid = document.createElement('div');
+        grid.style.display = 'grid';
+        grid.style.gridTemplateColumns = 'repeat(' + gridCols() + ', 1fr)';
+        grid.style.gap = '6px';
+        grid.style.padding = '6px';
+        const asp = cellAspect();
         vidUrls.forEach(src => {
-          const v = mkVideo(src); v.className = 'live-plain';
-          wrap.appendChild(v); v.play().catch(() => {});
+          const cell = document.createElement('div');
+          cell.style.position = 'relative';
+          cell.style.width = '100%';
+          cell.style.paddingTop = (asp * 100) + '%';
+          const v = mkVideo(src);
+          v.style.position = 'absolute'; v.style.left = '0'; v.style.top = '0';
+          v.style.width = '100%'; v.style.height = '100%'; v.style.objectFit = 'cover';
+          v.style.borderRadius = '3px';
+          cell.appendChild(v); grid.appendChild(cell); v.play().catch(() => {});
         });
+        wrap.appendChild(grid);
+
+        if (footerUrl) {
+          const f = new Image();
+          f.src = footerUrl; f.style.width = '100%'; f.style.display = 'block';
+          wrap.appendChild(f);
+        }
       }
 
       if (frameUrl && slots && slots.length >= vidUrls.length) {
+        // Full-design: videos inside the frame's slots, frame on top.
         wrap.className = 'live-wrap';
         const frame = new Image();
         frame.className = 'frame';
@@ -139,10 +175,10 @@
           frame.style.pointerEvents = 'none';
           wrap.appendChild(frame);
         };
-        frame.onerror = renderGrid;
+        frame.onerror = renderTemplate;
         frame.src = frameUrl;
       } else {
-        renderGrid();
+        renderTemplate();
       }
     }
 
