@@ -57,13 +57,17 @@
     }
     .btn.bw-btn { background: #444; color: #fff; }
     .btn.gif-btn { background: #6c5ce7; color: #fff; }
+    .btn.live-btn { background: #e84393; color: #fff; }
+    .live-wrap { position: relative; width: 100%; border-radius: 10px; overflow: hidden; box-shadow: 0 6px 24px rgba(0,0,0,0.5); background: #111; }
+    .live-wrap video, .live-wrap img.frame { position: absolute; }
+    .live-plain { width: 100%; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); background: #000; }
     .btn:active { opacity: 0.8; }
     .hint { color: #555; font-size: 12px; margin-top: -8px; }
     #expired { display: none; color: #f44336; font-size: 16px; text-align: center; }
     canvas { display: none; }
   </style>
 </head>
-<body> <h1>Your Photo is Ready!</h1> <p>Choose your preferred version</p> <div class="photos"> <div class="photo-card"> <p class="label">Colored</p> <!-- No crossorigin here — iOS long-press save works normally --> <img id="photoColor" alt="Colored photo" /> <button class="btn" onclick="downloadColor()">Download Color</button> </div> <div class="photo-card"> <p class="label">Black & White</p> <!-- src will be replaced with actual B&W data URL after load --> <img id="photoBW" alt="B&W photo" /> <button class="btn bw-btn" onclick="downloadBW()">Download B&W</button> </div> <div class="photo-card" id="gifCard" style="display:none"> <p class="label">GIF</p> <img id="photoGif" alt="Animated GIF" /> <button class="btn gif-btn" onclick="downloadGif()">Download GIF</button> </div> </div> <p class="hint">iOS: press & hold the photo → Save to Photos</p> <p id="expired">This photo has expired (24 hours).</p> <canvas id="canvas"></canvas> <script> const params   = new URLSearchParams(window.location.search);
+<body> <h1>Your Photo is Ready!</h1> <p>Choose your preferred version</p> <div class="photos"> <div class="photo-card"> <p class="label">Colored</p> <!-- No crossorigin here — iOS long-press save works normally --> <img id="photoColor" alt="Colored photo" /> <button class="btn" onclick="downloadColor()">Download Color</button> </div> <div class="photo-card"> <p class="label">Black & White</p> <!-- src will be replaced with actual B&W data URL after load --> <img id="photoBW" alt="B&W photo" /> <button class="btn bw-btn" onclick="downloadBW()">Download B&W</button> </div> <div class="photo-card" id="gifCard" style="display:none"> <p class="label">GIF</p> <img id="photoGif" alt="Animated GIF" /> <button class="btn gif-btn" onclick="downloadGif()">Download GIF</button> </div> <div class="photo-card" id="liveCard" style="display:none"> <p class="label">Live</p> <div id="liveWrap"></div> <button class="btn live-btn" onclick="downloadVid()">Download Video</button> </div> </div> <p class="hint">iOS: press & hold the photo → Save to Photos</p> <p id="expired">This photo has expired (24 hours).</p> <canvas id="canvas"></canvas> <script> const params   = new URLSearchParams(window.location.search);
     const imgUrl   = params.get('img');
     const gifUrl   = params.get('gif');
     const colorImg = document.getElementById('photoColor');
@@ -75,6 +79,58 @@
       gc.style.display = 'flex';
       gi.onerror = () => { gc.style.display = 'none'; };
       gi.src = gifUrl;
+    }
+
+    const vidUrl   = params.get('vid');
+    const frameUrl = params.get('frame');
+    const slotStr  = params.get('slot');
+
+    if (vidUrl) {
+      const card = document.getElementById('liveCard');
+      const wrap = document.getElementById('liveWrap');
+      card.style.display = 'flex';
+
+      const video = document.createElement('video');
+      video.src = vidUrl;
+      video.autoplay = true; video.loop = true; video.muted = true;
+      video.playsInline = true;
+      video.setAttribute('playsinline', ''); video.setAttribute('webkit-playsinline', ''); video.setAttribute('muted', '');
+      video.onerror = () => { card.style.display = 'none'; };
+
+      if (frameUrl && slotStr) {
+        const parts = slotStr.split(',').map(Number);
+        const cx = parts[0], cy = parts[1], w = parts[2], h = parts[3];
+        wrap.className = 'live-wrap';
+        const frame = new Image();
+        frame.className = 'frame';
+        frame.onload = () => {
+          const aspect = frame.naturalWidth > 0 ? frame.naturalHeight / frame.naturalWidth : 1.4;
+          const W = wrap.clientWidth || 260;
+          const H = W * aspect;
+          wrap.style.height = H + 'px';
+          video.style.left   = ((cx - w / 2) * W) + 'px';
+          video.style.top    = ((cy - h / 2) * H) + 'px';
+          video.style.width  = (w * W) + 'px';
+          video.style.height = (h * H) + 'px';
+          video.style.objectFit = 'cover';
+          frame.style.left = '0'; frame.style.top = '0';
+          frame.style.width = W + 'px'; frame.style.height = H + 'px';
+          frame.style.pointerEvents = 'none';
+          wrap.appendChild(video);
+          wrap.appendChild(frame);
+          video.play().catch(() => {});
+        };
+        frame.onerror = () => {
+          video.className = 'live-plain';
+          wrap.appendChild(video);
+          video.play().catch(() => {});
+        };
+        frame.src = frameUrl;
+      } else {
+        video.className = 'live-plain';
+        wrap.appendChild(video);
+        video.play().catch(() => {});
+      }
     }
 
     function isIOS() {
@@ -175,6 +231,15 @@
         .then(r => r.blob())
         .then(b => triggerDownload(URL.createObjectURL(b), 'photo.gif'))
         .catch(() => window.open(gifUrl, '_blank'));
+    }
+
+    function downloadVid() {
+      if (!vidUrl) return;
+      if (isIOS()) { window.open(vidUrl, '_blank'); return; }
+      fetch(vidUrl)
+        .then(r => r.blob())
+        .then(b => triggerDownload(URL.createObjectURL(b), 'photo-live.mp4'))
+        .catch(() => window.open(vidUrl, '_blank'));
     }
 
     function triggerDownload(url, name) {
