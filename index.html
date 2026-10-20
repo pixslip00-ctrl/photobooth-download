@@ -67,7 +67,7 @@
     canvas { display: none; }
   </style>
 </head>
-<body> <h1>Your Photo is Ready!</h1> <p>Choose your preferred version</p> <div class="photos"> <div class="photo-card"> <p class="label">Colored</p> <!-- No crossorigin here — iOS long-press save works normally --> <img id="photoColor" alt="Colored photo" /> <button class="btn" onclick="downloadColor()">Download Color</button> </div> <div class="photo-card"> <p class="label">Black & White</p> <!-- src will be replaced with actual B&W data URL after load --> <img id="photoBW" alt="B&W photo" /> <button class="btn bw-btn" onclick="downloadBW()">Download B&W</button> </div> <div class="photo-card" id="gifCard" style="display:none"> <p class="label">GIF</p> <img id="photoGif" alt="Animated GIF" /> <button class="btn gif-btn" onclick="downloadGif()">Download GIF</button> </div> <div class="photo-card" id="liveCard" style="display:none"> <p class="label">Live</p> <div id="liveWrap"></div> <button class="btn live-btn" onclick="downloadVid()">Download Video</button> </div> </div> <p class="hint">iOS: press & hold the photo → Save to Photos</p> <p id="expired">This photo has expired (24 hours).</p> <canvas id="canvas"></canvas> <script> const params   = new URLSearchParams(window.location.search);
+<body> <h1>Your Photo is Ready!</h1> <p>Choose your preferred version</p> <div class="photos"> <div class="photo-card"> <p class="label">Colored</p> <!-- No crossorigin here — iOS long-press save works normally --> <img id="photoColor" alt="Colored photo" /> <button class="btn" onclick="downloadColor()">Download Color</button> </div> <div class="photo-card"> <p class="label">Black & White</p> <!-- src will be replaced with actual B&W data URL after load --> <img id="photoBW" alt="B&W photo" /> <button class="btn bw-btn" onclick="downloadBW()">Download B&W</button> </div> <div class="photo-card" id="gifCard" style="display:none"> <p class="label">GIF</p> <img id="photoGif" alt="Animated GIF" /> <button class="btn gif-btn" onclick="downloadGif()">Download GIF</button> </div> <div class="photo-card" id="liveCard" style="display:none"> <p class="label">Live</p> <div id="liveWrap"></div> <button class="btn live-btn" onclick="downloadVid()">Download Video</button> </div> </div> <p class="hint">iOS: press & hold the photo → Save to Photos</p> <p id="expired">This photo has expired (24 hours).</p> <canvas id="canvas"></canvas> <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.min.js"></script> <script> const params   = new URLSearchParams(window.location.search);
     const imgUrl   = params.get('img');
     const gifUrl   = params.get('gif');
     const colorImg = document.getElementById('photoColor');
@@ -81,6 +81,7 @@
       gi.src = gifUrl;
     }
 
+    const liveUrl   = params.get('live');
     const vidsStr   = params.get('vids');
     const frameUrl  = params.get('frame');
     const slotsStr  = params.get('slots');
@@ -89,10 +90,14 @@
     const footerUrl = params.get('footer');
     const vidUrls   = vidsStr ? vidsStr.split(',').map(decodeURIComponent).filter(Boolean) : [];
 
+    const allVideos = [];
     function mkVideo(src) {
       const v = document.createElement('video');
       v.src = src;
+      v.preload = 'auto';
       v.autoplay = true; v.loop = true; v.muted = true; v.playsInline = true;
+      v.onerror = () => { v.style.background = '#c0392b'; };
+      allVideos.push(v);
       v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', ''); v.setAttribute('muted', '');
       return v;
     }
@@ -100,7 +105,17 @@
     function gridCols() { return (layout === '2x2' || layout === '3x2') ? 2 : 1; }
     function cellAspect() { return layout === '3-vertical' ? (9 / 16) : 1; }
 
-    if (vidUrls.length > 0) {
+    if (liveUrl) {
+      // App already composited one MP4 — just show + download it (works on any phone).
+      const card = document.getElementById('liveCard');
+      const wrap = document.getElementById('liveWrap');
+      card.style.display = 'flex';
+      wrap.style.width = '100%';
+      const v = mkVideo(liveUrl);
+      v.className = 'live-plain';
+      v.onerror = () => { card.style.display = 'none'; };
+      wrap.appendChild(v); v.play().catch(() => {});
+    } else if (vidUrls.length > 0) {
       const card = document.getElementById('liveCard');
       const wrap = document.getElementById('liveWrap');
       card.style.display = 'flex';
@@ -112,6 +127,7 @@
       // Sandwich / grid template: header image + video grid + footer image, as one.
       function renderTemplate() {
         wrap.className = '';
+        wrap.style.width = '100%';
         wrap.style.background = '#fff';
         wrap.style.borderRadius = '10px';
         wrap.style.overflow = 'hidden';
@@ -282,6 +298,10 @@
         .catch(() => window.open(gifUrl, '_blank'));
     }
 
+    ['touchstart', 'click'].forEach(ev => document.addEventListener(ev, () => {
+      allVideos.forEach(v => { v.play().catch(() => {}); });
+    }, { passive: true }));
+
     function loadVideoEl(src) {
       return new Promise((resolve, reject) => {
         const v = document.createElement('video');
@@ -359,38 +379,88 @@
         };
       }
 
+      H = 2 * Math.round(H / 2); // H.264 needs even dimensions
       const canvas = document.createElement('canvas');
       canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext('2d');
 
       await Promise.all(vEls.map(v => v.play().catch(() => {})));
 
+      const fps = 15;
+      const durSec = Math.min(6, Math.max(2, vEls[0].duration || 3));
+
+      let done = false;
+      if (window.VideoEncoder && window.Mp4Muxer) {
+        try { await encodeWebCodecs(canvas, ctx, drawFn, W, H, fps, durSec); done = true; } catch (e) {}
+      }
+      if (!done && window.MediaRecorder && canvas.captureStream) {
+        await encodeMediaRecorder(canvas, ctx, drawFn, durSec); done = true;
+      }
+      vEls.forEach(v => { try { v.pause(); } catch {} });
+      if (!done) throw new Error('no video encoder available');
+    }
+
+    // Real MP4 via WebCodecs — works on iOS Safari 16.4+ and Android Chrome.
+    async function encodeWebCodecs(canvas, ctx, drawFn, W, H, fps, durSec) {
+      const muxer = new Mp4Muxer.Muxer({
+        target: new Mp4Muxer.ArrayBufferTarget(),
+        video: { codec: 'avc', width: W, height: H },
+        fastStart: 'in-memory',
+      });
+      let encErr = null;
+      const encoder = new VideoEncoder({
+        output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+        error: (e) => { encErr = e; },
+      });
+      encoder.configure({ codec: 'avc1.42001f', width: W, height: H, bitrate: 3000000, framerate: fps });
+
+      const total = Math.round(fps * durSec);
+      const frameDurUs = Math.round(1e6 / fps);
+      for (let i = 0; i < total; i++) {
+        if (encErr) throw encErr;
+        drawFn(ctx);
+        const frame = new VideoFrame(canvas, { timestamp: i * frameDurUs, duration: frameDurUs });
+        encoder.encode(frame, { keyFrame: i % fps === 0 });
+        frame.close();
+        await new Promise(r => setTimeout(r, 1000 / fps));
+      }
+      await encoder.flush();
+      encoder.close();
+      if (encErr) throw encErr;
+      muxer.finalize();
+      triggerDownload(URL.createObjectURL(new Blob([muxer.target.buffer], { type: 'video/mp4' })), 'photo-live.mp4');
+    }
+
+    // Fallback for older Android: MediaRecorder.
+    async function encodeMediaRecorder(canvas, ctx, drawFn, durSec) {
       const stream = canvas.captureStream(30);
-      const mime = (window.MediaRecorder && MediaRecorder.isTypeSupported('video/mp4')) ? 'video/mp4'
-                 : (window.MediaRecorder && MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) ? 'video/webm;codecs=vp9'
+      const mime = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4'
+                 : MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9'
                  : 'video/webm';
       const rec = new MediaRecorder(stream, { mimeType: mime });
       const chunks = [];
       rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
       const stopped = new Promise(res => { rec.onstop = res; });
-
       let raf;
       const loop = () => { drawFn(ctx); raf = requestAnimationFrame(loop); };
       loop();
-
       rec.start();
-      const dur = Math.min(6, Math.max(2, vEls[0].duration || 3)) * 1000;
-      await new Promise(r => setTimeout(r, dur));
+      await new Promise(r => setTimeout(r, durSec * 1000));
       rec.stop();
       cancelAnimationFrame(raf);
       await stopped;
-      vEls.forEach(v => { try { v.pause(); } catch {} });
-
       const ext = mime.indexOf('mp4') >= 0 ? 'mp4' : 'webm';
       triggerDownload(URL.createObjectURL(new Blob(chunks, { type: mime })), 'photo-live.' + ext);
     }
 
     function downloadVid() {
+      if (liveUrl) {
+        if (isIOS()) { window.open(liveUrl, '_blank'); return; }
+        fetch(liveUrl).then(r => r.blob())
+          .then(b => triggerDownload(URL.createObjectURL(b), 'photo-live.mp4'))
+          .catch(() => window.open(liveUrl, '_blank'));
+        return;
+      }
       if (vidUrls.length === 0) return;
       const btn = document.querySelector('.live-btn');
       const label = btn ? btn.textContent : '';
